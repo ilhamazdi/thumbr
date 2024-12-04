@@ -20,7 +20,7 @@ A Python script that generates thumbnail grids from video files. It automaticall
 
 ## Example Output
 
-![Example thumbnail grid generated from Big Buck Bunny](big_buck_bunny_720p_h264_thumbnail.jpg)
+![Example thumbnail grid generated from Big Buck Bunny](output/big_buck_bunny_720p_h264_thumbnail.jpg)
 
 ## Installation
 
