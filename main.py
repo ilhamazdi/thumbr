@@ -1,26 +1,46 @@
+from src.thumbr import Thumbr
+import os
+import argparse
 from pathlib import Path
-from video_thumbnailer import Thumbr
+
 
 def main():
-    # Create a thumbnailer with default 3x3 grid
-    thumbnailer = Thumbr(grid_size=(3, 4))
+    parser = argparse.ArgumentParser(description="Generate a thumbnail from a video.")
+    parser.add_argument("input", help="Input video file path.")
+    parser.add_argument("-o", "--output", help="Output thumbnail file path.")
+    parser.add_argument(
+        "-g",
+        "--grid",
+        default="3x3",
+        help="Grid size in ROWSxCOLS format (e.g., 3x3).",
+    )
 
-    # Define input path
-    video_path = Path(r"path/to/your/video.mp4")
-    
-    # Create output directory if it doesn't exist
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
-    
-    # Generate output path in the output directory
-    output_path = output_dir / f"{video_path.stem}_thumbnail.jpg"
+    args = parser.parse_args()
+
+    input_path = args.input
+    if not os.path.exists(input_path):
+        print(f"Error: Input file not found at '{input_path}'")
+        return
+
+    output_path = args.output
+    if not output_path:
+        p = Path(input_path)
+        output_path = str(p.with_name(f"{p.stem}_thumbr.jpg"))
 
     try:
-        # Generate thumbnail with specified output path
-        result_path = thumbnailer.generate_thumbnail(str(video_path), str(output_path))
-        print(f"Thumbnail generated successfully: {result_path}")
+        grid_rows, grid_cols = map(int, args.grid.split("x"))
+    except ValueError:
+        print("Error: Invalid grid format. Please use ROWSxCOLS (e.g., 4x4).")
+        return
+
+    thumbr = Thumbr(grid_size=(grid_rows, grid_cols))
+    try:
+        print(f"Generating thumbnail for {input_path}...")
+        thumbr.generate_thumbnail(input_path, output_path)
+        print(f"Thumbnail generated successfully: {output_path}")
     except Exception as e:
-        print(f"Error generating thumbnail: {str(e)}")
+        print(f"An error occurred: {e}")
+
 
 if __name__ == "__main__":
     main()

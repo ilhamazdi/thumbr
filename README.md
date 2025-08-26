@@ -1,22 +1,23 @@
 # Thumbr — Video Thumbnail Generator
 
-[![License: MIT with Attribution](https://img.shields.io/badge/License-MIT%20with%20Attribution-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Python script that generates thumbnail grids from video files. It automatically captures screenshots from the video and stitches them together into a single image, creating a comprehensive preview with detailed video information and timestamps.
+A Python script that generates visual thumbnail grids from video files. It automatically captures evenly distributed frames from the video and stitches them together into a single image, creating a comprehensive preview with detailed video information and timestamps.
 
 ## Features
 
-- Creates a grid of screenshots from any video file
-- Customizable grid size (default is 3x3)
-- Maintains original video aspect ratio
-- Includes detailed video information header:
-  - Filename
-  - Duration
-  - Resolution
-  - Frame Rate
-  - File Size
-- Timestamps on each frame
-- Supports various video formats
+- **Automated Frame Capture:** Extracts evenly distributed frames across the video's duration.
+- **Customizable Grid Layout:** Supports flexible grid sizes (e.g., 3x3, 4x4) for arranging thumbnails.
+- **Aspect Ratio Preservation:** Maintains the original aspect ratio of video frames in the thumbnails.
+- **Detailed Information Header:** Generates a header with essential video details:
+    - Filename
+    - Duration
+    - Resolution (Width x Height)
+    - Frame Rate (FPS)
+    - File Size
+- **Timestamp Overlays:** Each captured frame is overlaid with its corresponding timestamp.
+- **Watermarking:** Adds a customizable watermark to the generated thumbnail.
+- **Progress Tracking:** Provides a progress bar during thumbnail generation.
 
 ## Example Output
 
@@ -24,42 +25,53 @@ A Python script that generates thumbnail grids from video files. It automaticall
 
 ## Installation
 
-1. Clone this repository or download the files
-2. Install the required dependencies:
-
-```bash
-pip install -r requirements.txt
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/ilhamazdi/thumbr.git
+    cd thumbr
+    ```
+2.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 ## Usage
 
-1. Open `main.py` and update the video file path:
+Run the `main.py` script from your terminal.
 
-```python
-video_path = Path("path/to/your/video.mp4")  # Change this to your video file location
-```
-
-2. Run the script:
+**Basic Usage:**
 
 ```bash
-python main.py
+python main.py "path/to/your/video.mp4"
+```
+This will generate a thumbnail image (e.g., `your_video_thumbnail.jpg`) in the same directory as the input video.
+
+**Custom Output Path:**
+
+Specify a different output path and filename using the `-o` or `--output` flag:
+
+```bash
+python main.py "path/to/your/video.mp4" -o "path/to/desired/output/my_video_preview.png"
 ```
 
-The script will automatically:
-- Create an output directory if it doesn't exist
-- Generate a thumbnail in the output folder
-- Add timestamps to each frame
-- Include comprehensive video information
+**Custom Grid Size:**
+
+Change the grid dimensions (rows x columns) using the `-g` or `--grid` flag (default is `3x3`):
+
+```bash
+python main.py "path/to/your/video.mp4" -g 4x5
+```
 
 ## Requirements
 
-- Python 3.6+
-- OpenCV (opencv-python)
-- NumPy
-- Pillow (PIL)
+-   Python 3.6+
+-   `opencv-python` (for video processing and broad codec support)
+-   `numpy` (for numerical operations)
+-   `Pillow` (PIL) (for image manipulation)
+-   `tqdm` (for progress bars)
 
 ## License
 
-MIT License with Attribution
+MIT License
 
-Copyright (c) [2024] [ilhamazdi]
+Copyright (c) 2025 ilhamazdi
