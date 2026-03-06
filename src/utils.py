@@ -5,11 +5,11 @@ from typing import List, Optional, Set
 from PIL import ImageFont
 
 try:
-    import cv2
+    import av
 
-    HAS_CV2 = True
+    HAS_AV = True
 except ImportError:
-    HAS_CV2 = False
+    HAS_AV = False
 
 
 # All video formats supported by FFmpeg (comprehensive list)
@@ -142,34 +142,34 @@ def is_video_file(file_path: str, probe_with_opencv: bool = False) -> bool:
     if ext in VIDEO_EXTENSIONS:
         return True
 
-    # If extension not found and probing is enabled, try OpenCV
+    # If extension not found and probing is enabled, try PyAV
     if probe_with_opencv:
-        return _probe_video_with_opencv(file_path)
+        return _probe_video_with_pyav(file_path)
 
     return False
 
 
-def _probe_video_with_opencv(file_path: str) -> bool:
-    """Probe if a file is a valid video using OpenCV.
+def _probe_video_with_pyav(file_path: str) -> bool:
+    """Probe if a file is a valid video using PyAV.
 
-    This uses OpenCV's video capture to determine if the file
-    is a valid video that FFmpeg can read.
+    This uses PyAV to determine if the file is a valid video
+    that FFmpeg can read.
 
     Args:
         file_path: Path to the file to probe.
 
     Returns:
-        True if OpenCV can successfully open the file as video.
+        True if PyAV can successfully open the file as video.
     """
-    if not HAS_CV2:
+    if not HAS_AV:
         return False
 
     try:
-        # Try to open the file with OpenCV
-        cap = cv2.VideoCapture(file_path)
-        is_opened = cap.isOpened()
-        cap.release()
-        return is_opened
+        with av.open(file_path) as container:
+            # Try to decode first frame to verify
+            for _ in container.decode(video=0):
+                return True
+        return False
     except Exception:
         return False
 

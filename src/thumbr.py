@@ -1,4 +1,4 @@
-import cv2
+import av
 import logging
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -65,6 +65,7 @@ class Thumbr:
         max_width: int = 1920,
         resize_frames_at_capture: bool = True,
         max_resize_dimension: int = 640,
+        verbose: bool = False,
     ):
         """Initialize the thumbnailer with grid configuration.
 
@@ -76,12 +77,14 @@ class Thumbr:
             resize_frames_at_capture: If True, resize frames during capture
                                       to reduce memory footprint.
             max_resize_dimension: Maximum dimension when resizing frames.
+            verbose: If True, show detailed progress during thumbnail generation.
         """
         self.grid_size = grid_size
         self.total_frames = grid_size[0] * grid_size[1]
         self.max_width = max_width
         self.resize_frames_at_capture = resize_frames_at_capture
         self.max_resize_dimension = max_resize_dimension
+        self.verbose = verbose
 
         # Initialize fonts with cross-platform fallback
         self.font = load_font()
@@ -144,17 +147,23 @@ class Thumbr:
         if progress_callback:
             progress_callback("Opening video")
 
-        cap = cv2.VideoCapture(video_path)
         try:
-            if not cap.isOpened():
-                raise ValueError(f"Could not open video file: {video_path}")
+            container = av.open(video_path)
+        except Exception as e:
+            raise ValueError(f"Could not open video file: {video_path}: {e}")
 
-            # Get video properties
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            duration = frame_count / fps if fps > 0 else 0
+        try:
+            stream = container.streams.video[0]
+
+            width = stream.width
+            height = stream.height
+            fps = float(stream.average_rate) if stream.average_rate else 24.0
+            frame_count = stream.frames or 0
+
+            if frame_count == 0:
+                frame_count = int(container.duration * stream.time_base * fps)
+
+            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
             file_size = os.path.getsize(video_path)
 
             video_info = {
@@ -170,16 +179,13 @@ class Thumbr:
             if progress_callback:
                 progress_callback("Capturing frames")
 
-            # Capture frames
             frames = []
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            interval = total_frames // (self.total_frames + 1)
+            interval = frame_count // (self.total_frames + 1) if frame_count > 0 else 1
 
-            # Calculate target size for frame resizing (if enabled)
             target_width = None
             target_height = None
             if self.resize_frames_at_capture:
-                aspect_ratio = width / height
+                aspect_ratio = width / height if height > 0 else 1.0
                 if width > height:
                     target_width = self.max_resize_dimension
                     target_height = int(target_width / aspect_ratio)
@@ -188,35 +194,33 @@ class Thumbr:
                     target_width = int(target_height * aspect_ratio)
 
             for i in range(self.total_frames):
-                frame_pos = (i + 1) * interval
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-                ret, frame = cap.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                target_frame_num = (i + 1) * interval
 
-                    # Resize if enabled
-                    if target_width and target_height:
-                        frame_rgb = cv2.resize(
-                            frame_rgb,
-                            (target_width, target_height),
-                            interpolation=cv2.INTER_LINEAR,
-                        )
+                try:
+                    # Calculate timestamp in stream timebase units
+                    # timestamp_seconds = frame_number / fps
+                    # timestamp_stream_units = timestamp_seconds / time_base
+                    timestamp_sec = target_frame_num / fps if fps > 0 else 0
+                    timestamp_ts = int(timestamp_sec / float(stream.time_base))
 
-                    frames.append(frame_rgb)
+                    container.seek(timestamp_ts)
+                    for frame in container.decode(video=0):
+                        frame_rgb = frame.to_ndarray(format="rgb24")
 
-                    # Explicitly delete original frame to free memory
-                    del frame
+                        if target_width and target_height:
+                            frame_rgb = self._resize_frame(
+                                frame_rgb, target_width, target_height
+                            )
 
-            # Ensure video capture is released
-            cap.release()
-            cap = None
+                        frames.append(frame_rgb)
+                        break
+                except Exception:
+                    continue
 
             return video_info, frames
 
         finally:
-            # Ensure capture is always released
-            if cap is not None:
-                cap.release()
+            container.close()
 
     def get_video_info(self, video_path: str) -> dict:
         """Get video information including resolution, duration, and file size.
@@ -230,28 +234,36 @@ class Thumbr:
         Returns:
             Dictionary containing video information.
         """
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise ValueError(f"Could not open video file: {video_path}")
+        try:
+            container = av.open(video_path)
+        except Exception as e:
+            raise ValueError(f"Could not open video file: {video_path}: {e}")
 
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-        file_size = os.path.getsize(video_path)
+        try:
+            stream = container.streams.video[0]
 
-        cap.release()
+            width = stream.width
+            height = stream.height
+            fps = float(stream.average_rate) if stream.average_rate else 24.0
+            frame_count = stream.frames or 0
 
-        return {
-            "width": width,
-            "height": height,
-            "fps": fps,
-            "frame_count": frame_count,
-            "duration": duration,
-            "file_size": file_size,
-            "filename": os.path.basename(video_path),
-        }
+            if frame_count == 0:
+                frame_count = int(container.duration * stream.time_base * fps)
+
+            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0
+            file_size = os.path.getsize(video_path)
+
+            return {
+                "width": width,
+                "height": height,
+                "fps": fps,
+                "frame_count": frame_count,
+                "duration": duration,
+                "file_size": file_size,
+                "filename": os.path.basename(video_path),
+            }
+        finally:
+            container.close()
 
     def capture_frames(self, video_path: str) -> List[np.ndarray]:
         """Capture evenly distributed frames from the video.
@@ -265,24 +277,71 @@ class Thumbr:
         Returns:
             List of captured frames as numpy arrays.
         """
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise ValueError(f"Could not open video file: {video_path}")
+        try:
+            container = av.open(video_path)
+        except Exception as e:
+            raise ValueError(f"Could not open video file: {video_path}: {e}")
 
-        frames = []
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        interval = total_frames // (self.total_frames + 1)
+        try:
+            stream = container.streams.video[0]
+            frame_count = stream.frames or 0
 
-        for i in range(self.total_frames):
-            frame_pos = (i + 1) * interval
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            ret, frame = cap.read()
-            if ret:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(frame_rgb)
+            if frame_count == 0:
+                fps = float(stream.average_rate) if stream.average_rate else 24.0
+                frame_count = int(container.duration * stream.time_base * fps)
 
-        cap.release()
-        return frames
+            interval = frame_count // (self.total_frames + 1) if frame_count > 0 else 1
+
+            target_width = None
+            target_height = None
+            if self.resize_frames_at_capture:
+                aspect_ratio = (
+                    stream.width / stream.height if stream.height > 0 else 1.0
+                )
+                if stream.width > stream.height:
+                    target_width = self.max_resize_dimension
+                    target_height = int(target_width / aspect_ratio)
+                else:
+                    target_height = self.max_resize_dimension
+                    target_width = int(target_height * aspect_ratio)
+
+            frames = []
+
+            for i in range(self.total_frames):
+                target_frame_num = (i + 1) * interval
+
+                try:
+                    # Calculate timestamp in stream timebase units
+                    timestamp_sec = target_frame_num / fps if fps > 0 else 0
+                    timestamp_ts = int(timestamp_sec / float(stream.time_base))
+
+                    container.seek(timestamp_ts)
+                    for frame in container.decode(video=0):
+                        frame_rgb = frame.to_ndarray(format="rgb24")
+
+                        if target_width and target_height:
+                            frame_rgb = self._resize_frame(
+                                frame_rgb, target_width, target_height
+                            )
+
+                        frames.append(frame_rgb)
+                        break
+                except Exception:
+                    continue
+
+            return frames
+        finally:
+            container.close()
+
+    def _resize_frame(self, frame: np.ndarray, width: int, height: int) -> np.ndarray:
+        """Resize a frame using numpy/scipy interpolation."""
+        from scipy.ndimage import zoom
+
+        if frame.shape[0] == height and frame.shape[1] == width:
+            return frame
+
+        zoom_factors = (height / frame.shape[0], width / frame.shape[1], 1)
+        return zoom(frame, zoom_factors, order=1)
 
     def create_info_header(self, video_info: dict, width: int) -> Image.Image:
         """Create an information header for the thumbnail.
@@ -521,6 +580,79 @@ class Thumbr:
 
         return final_image
 
+    def _generate_thumbnail_no_progress(
+        self,
+        video_path: str,
+        output_path: str = None,
+        max_width: int = None,
+        use_combined_capture: bool = True,
+    ) -> str:
+        """Generate thumbnail without progress bar (non-verbose mode)."""
+        max_width = max_width or self.max_width
+
+        if use_combined_capture:
+            video_info, frames = self.get_video_info_and_frames(video_path)
+        else:
+            video_info = self.get_video_info(video_path)
+            frames = self.capture_frames(video_path)
+
+        if not frames:
+            raise ValueError("No frames could be captured from the video")
+
+        if output_path is None:
+            output_dir = Path("output")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            video_filename = Path(video_path).stem
+            safe_filename = "".join(
+                c if c.isalnum() or c == "_" else "_"
+                for c in video_filename.replace(" ", "_")
+            )
+            output_path = str(output_dir / f"{safe_filename}_thumbnail.jpg")
+
+        dimensions = self._calculate_dimensions(video_info, max_width)
+        info_section = self._create_info_section(video_info, dimensions)
+
+        grid_width = dimensions["grid_width"]
+        total_height = dimensions["total_height"]
+        final_image = Image.new("RGB", (grid_width, total_height), "white")
+        final_image.paste(info_section, (0, 0))
+
+        frames_start_y = dimensions["info_height"]
+        total_duration = video_info["duration"]
+        frame_interval = total_duration / (self.total_frames + 1)
+
+        for idx, frame in enumerate(frames):
+            timestamp = (idx + 1) * frame_interval
+            frame_with_timestamp = self._process_frame_with_timestamp(
+                frame, timestamp, dimensions
+            )
+
+            row = idx // self.grid_size[1]
+            col = idx % self.grid_size[1]
+            x = dimensions["padding"] + (
+                col * (dimensions["frame_width"] + dimensions["spacing"])
+            )
+            y = frames_start_y + (
+                row * (dimensions["frame_height"] + dimensions["spacing"])
+            )
+            final_image.paste(frame_with_timestamp, (x, y))
+            del frame_with_timestamp
+
+        del frames
+
+        final_image = self._add_watermark(final_image, dimensions)
+
+        output_lower = output_path.lower()
+        if output_lower.endswith((".jpg", ".jpeg")):
+            final_image.save(output_path, quality=50)
+        else:
+            final_image.save(output_path)
+
+        del final_image
+        if self.verbose:
+            self.logger.info(f"Thumbnail saved: {output_path}")
+        return output_path
+
     def generate_thumbnail(
         self,
         video_path: str,
@@ -540,6 +672,15 @@ class Thumbr:
             Path to the generated thumbnail.
         """
         max_width = max_width or self.max_width
+
+        # Only show detailed progress in verbose mode
+        show_progress = getattr(self, "verbose", False)
+
+        if not show_progress:
+            # Non-verbose: do the work without progress bar
+            return self._generate_thumbnail_no_progress(
+                video_path, output_path, max_width, use_combined_capture
+            )
 
         # Define the steps for progress tracking
         steps = [
@@ -685,7 +826,8 @@ class Thumbr:
 
         # Check for existing output
         if skip_existing and Path(output_path).exists():
-            self.logger.info(f"Skipping {video_path} - thumbnail already exists")
+            if self.verbose:
+                self.logger.info(f"Skipping {video_path} - thumbnail already exists")
             return ThumbnailResult(
                 video_path=video_path,
                 output_path=output_path,
@@ -750,7 +892,9 @@ def _process_single_video(args: Tuple) -> ThumbnailResult:
         logger.addHandler(handler)
 
     # Create Thumbr instance
-    thumbr = Thumbr(grid_size=grid_size, max_width=max_width, logger=logger)
+    thumbr = Thumbr(
+        grid_size=grid_size, max_width=max_width, logger=logger, verbose=verbose
+    )
 
     # Check for shutdown
     if is_shutdown_requested():
@@ -764,6 +908,101 @@ def _process_single_video(args: Tuple) -> ThumbnailResult:
     return thumbr.generate_thumbnail_safe(
         video_path, output_path, max_width, skip_existing
     )
+
+
+class BatchProgressDisplay:
+    """Enhanced progress display for batch processing."""
+
+    def __init__(
+        self, total: int, output_dir: str, logger: Optional[logging.Logger] = None
+    ):
+        self.total = total
+        self.output_dir = output_dir
+        self.logger = logger or get_logger("thumbr")
+        self.completed = 0
+        self.succeeded = 0
+        self.skipped = 0
+        self.failed = 0
+        self.current_file = ""
+        import time
+
+        self.start_time = time.time()
+        self._lock = threading.Lock()
+
+    def _format_time(self, seconds: float) -> str:
+        """Format elapsed time."""
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        if mins > 0:
+            return f"{mins}m {secs}s"
+        return f"{secs}s"
+
+    def _truncate_filename(self, path: str, max_len: int = 50) -> str:
+        """Truncate filename for display."""
+        filename = Path(path).name
+        if len(filename) > max_len:
+            return filename[: max_len - 3] + "..."
+        return filename
+
+    def print_header(self):
+        """Print the initial header."""
+        print(
+            f"Batch: {self.total} files -> {self._truncate_filename(self.output_dir)}"
+        )
+
+    def update(
+        self,
+        video_path: str,
+        result: Optional[ThumbnailResult] = None,
+        is_processing: bool = False,
+    ):
+        """Update progress display."""
+        with self._lock:
+            if is_processing:
+                self.current_file = self._truncate_filename(video_path)
+                self._render()
+                return
+
+            self.completed += 1
+            if result:
+                if result.skipped:
+                    self.skipped += 1
+                elif result.success:
+                    self.succeeded += 1
+                else:
+                    self.failed += 1
+
+            self._render()
+
+    def _render(self):
+        """Render the progress bar."""
+        import time
+
+        elapsed = time.time() - self.start_time
+        elapsed_str = self._format_time(elapsed)
+
+        bar_width = 20
+        filled = int(bar_width * self.completed / self.total) if self.total > 0 else 0
+        bar = "█" * filled + "░" * (bar_width - filled)
+
+        status_line = f"[{bar}] {self.completed}/{self.total} "
+        status_line += f"✓{self.succeeded} ⊘{self.skipped} ✗{self.failed} "
+        status_line += f"⏱{elapsed_str}"
+        if self.current_file:
+            status_line += f" | {self.current_file}"
+
+        print(f"\r\033[K{status_line}", end="", flush=True)
+
+    def print_summary(self):
+        """Print final summary."""
+        import time
+
+        elapsed = time.time() - self.start_time
+        elapsed_str = self._format_time(elapsed)
+
+        print(
+            f"\r\033[KDone: ✓{self.succeeded} ⊘{self.skipped} ✗{self.failed} in {elapsed_str} -> {self._truncate_filename(self.output_dir)}"
+        )
 
 
 class BatchProcessor:
@@ -805,6 +1044,8 @@ class BatchProcessor:
 
         self.logger.info(f"Using {self.workers} worker(s) for parallel processing")
 
+        self._batch_output_dir: Optional[str] = None
+
     def process_path(
         self,
         path: str,
@@ -833,6 +1074,23 @@ class BatchProcessor:
 
         self.logger.info(f"Found {len(videos)} video(s)")
 
+        # Create timestamp-based output directory for this batch
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_output_dir = output_dir or "output"
+        self._batch_output_dir = str(Path(base_output_dir) / timestamp)
+        Path(self._batch_output_dir).mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"Output directory: {self._batch_output_dir}")
+
+        # Intelligent worker adjustment - use 5 or fewer based on file count
+        actual_workers = min(5, len(videos))
+        if actual_workers != self.workers:
+            self.logger.info(
+                f"Adjusted workers to {actual_workers} based on {len(videos)} video(s)"
+            )
+        self.workers = actual_workers
+
         # Process each video
         results = []
 
@@ -852,36 +1110,39 @@ class BatchProcessor:
         import logging
 
         thumbr = Thumbr(
-            grid_size=self.grid_size, max_width=self.max_width, logger=self.logger
+            grid_size=self.grid_size,
+            max_width=self.max_width,
+            logger=self.logger,
+            verbose=self.verbose,
         )
 
         results = []
 
-        with tqdm(total=len(videos), desc="Processing videos", unit="file") as pbar:
-            for video_path in videos:
-                if is_shutdown_requested():
-                    self.logger.info("Shutdown requested, stopping processing")
-                    break
+        progress = BatchProgressDisplay(
+            total=len(videos),
+            output_dir=self._batch_output_dir or "output",
+            logger=self.logger,
+        )
+        progress.print_header()
 
-                # Determine output path
-                output_path = self._get_output_path(video_path, output_dir)
+        for video_path in videos:
+            if is_shutdown_requested():
+                self.logger.info("Shutdown requested, stopping processing")
+                break
 
-                result = thumbr.generate_thumbnail_safe(
-                    video_path, output_path, self.max_width, self.skip_existing
-                )
+            progress.update(video_path, is_processing=True)
 
-                results.append(result)
+            # Determine output path
+            output_path = self._get_output_path(video_path, output_dir)
 
-                # Log result
-                if result.skipped:
-                    pbar.write(f"Skipped: {video_path}")
-                elif result.success:
-                    pbar.write(f"✓ {video_path}")
-                else:
-                    pbar.write(f"✗ {video_path}: {result.error}")
+            result = thumbr.generate_thumbnail_safe(
+                video_path, output_path, self.max_width, self.skip_existing
+            )
 
-                pbar.update(1)
+            results.append(result)
+            progress.update(video_path, result)
 
+        progress.print_summary()
         return results
 
     def _process_parallel(
@@ -912,6 +1173,13 @@ class BatchProcessor:
 
         results = []
 
+        progress = BatchProgressDisplay(
+            total=len(work_items),
+            output_dir=self._batch_output_dir or "output",
+            logger=self.logger,
+        )
+        progress.print_header()
+
         # Use ThreadPoolExecutor for parallel processing
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
             # Submit all tasks
@@ -920,60 +1188,49 @@ class BatchProcessor:
                 for item in work_items
             }
 
-            with tqdm(
-                total=len(work_items), desc="Processing videos", unit="file"
-            ) as pbar:
-                for future in as_completed(future_to_video):
-                    if is_shutdown_requested():
-                        self.logger.info(
-                            "Shutdown requested, canceling remaining tasks"
+            for future in as_completed(future_to_video):
+                if is_shutdown_requested():
+                    self.logger.info("Shutdown requested, canceling remaining tasks")
+                    # Cancel pending futures
+                    for f in future_to_video:
+                        f.cancel()
+                    break
+
+                video_path = future_to_video[future]
+
+                try:
+                    result = future.result()
+                    results.append(result)
+                    progress.update(video_path, result)
+
+                except Exception as e:
+                    self.logger.error(f"Unexpected error processing {video_path}: {e}")
+                    results.append(
+                        ThumbnailResult(
+                            video_path=video_path,
+                            output_path=None,
+                            success=False,
+                            error=str(e),
                         )
-                        # Cancel pending futures
-                        for f in future_to_video:
-                            f.cancel()
-                        break
+                    )
+                    progress.update(video_path, results[-1])
 
-                    video_path = future_to_video[future]
-
-                    try:
-                        result = future.result()
-                        results.append(result)
-
-                        # Log result
-                        if result.skipped:
-                            pbar.write(f"Skipped: {video_path}")
-                        elif result.success:
-                            pbar.write(f"✓ {video_path}")
-                        else:
-                            pbar.write(f"✗ {video_path}: {result.error}")
-
-                    except Exception as e:
-                        self.logger.error(
-                            f"Unexpected error processing {video_path}: {e}"
-                        )
-                        results.append(
-                            ThumbnailResult(
-                                video_path=video_path,
-                                output_path=None,
-                                success=False,
-                                error=str(e),
-                            )
-                        )
-
-                    pbar.update(1)
-
+        progress.print_summary()
         return results
 
     def _get_output_path(
         self, video_path: str, output_dir: Optional[str]
     ) -> Optional[str]:
         """Determine output path for a video."""
-        if output_dir is None:
-            # Default to output/ directory
-            output_dir = "output"
+        # Use batch-specific directory if set, otherwise fall back to provided output_dir
+        use_dir = (
+            self._batch_output_dir
+            if self._batch_output_dir
+            else (output_dir or "output")
+        )
 
         # Ensure output directory exists
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        Path(use_dir).mkdir(parents=True, exist_ok=True)
 
         video_filename = Path(video_path).stem
         safe_filename = "".join(
@@ -981,7 +1238,7 @@ class BatchProcessor:
             for c in video_filename.replace(" ", "_")
         )
 
-        return str(Path(output_dir) / f"{safe_filename}_thumbnail.jpg")
+        return str(Path(use_dir) / f"{safe_filename}_thumbnail.jpg")
 
 
 def process_batch(
@@ -1039,5 +1296,6 @@ def process_batch(
         "successful": successful,
         "skipped": skipped,
         "failed": failed,
+        "output_dir": processor._batch_output_dir,
         "results": results,
     }

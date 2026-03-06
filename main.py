@@ -272,16 +272,7 @@ def run_batch_processing(
             verbose=verbose,
         )
 
-        # Print summary
-        print("\n" + "=" * 50)
-        print("BATCH PROCESSING COMPLETE")
-        print("=" * 50)
-        print(f"Total videos:    {stats['total']}")
-        print(f"Successful:      {stats['successful']}")
-        print(f"Skipped:         {stats['skipped']}")
-        print(f"Failed:          {stats['failed']}")
-        print("=" * 50)
-
+        # Print final status (summary already shown by BatchProgressDisplay)
         if stats["failed"] > 0:
             logger.warning(f"{stats['failed']} video(s) failed processing")
             return 1

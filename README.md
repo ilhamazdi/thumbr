@@ -17,7 +17,9 @@ A Python script that generates visual thumbnail grids from video files. It autom
     - File Size
 - **Timestamp Overlays:** Each captured frame is overlaid with its corresponding timestamp.
 - **Watermarking:** Adds a customizable watermark to the generated thumbnail.
-- **Progress Tracking:** Provides a progress bar during thumbnail generation.
+- **Batch Processing:** Process multiple videos in parallel with intelligent worker allocation.
+- **Clean Progress Display:** Single-line progress bar with real-time status updates.
+- **Timestamped Output:** Each batch run creates its own timestamped output directory.
 
 ## Example Output
 
@@ -39,39 +41,76 @@ A Python script that generates visual thumbnail grids from video files. It autom
 
 Run the `main.py` script from your terminal.
 
-**Basic Usage:**
+**Process a single video:**
 
 ```bash
 python main.py "path/to/your/video.mp4"
 ```
-This will generate a thumbnail image (e.g., `your_video_thumbnail.jpg`) in the same directory as the input video.
 
-**Custom Output Path:**
+**Process all videos in a directory:**
 
-Specify a different output path and filename using the `-o` or `--output` flag:
+```bash
+python main.py "path/to/videos/"
+```
+
+**Process recursively with batch processing:**
+
+```bash
+python main.py "path/to/videos/" --recursive --workers 5
+```
+
+**Custom output path:**
 
 ```bash
 python main.py "path/to/your/video.mp4" -o "path/to/desired/output/my_video_preview.png"
 ```
 
-**Custom Grid Size:**
-
-Change the grid dimensions (rows x columns) using the `-g` or `--grid` flag (default is `3x3`):
+**Custom grid size:**
 
 ```bash
 python main.py "path/to/your/video.mp4" -g 4x5
 ```
 
+**Skip existing thumbnails:**
+
+```bash
+python main.py "path/to/videos/" --skip-existing
+```
+
+**Verbose mode (detailed progress):**
+
+```bash
+python main.py "path/to/videos/" -v
+```
+
+## Progress Display
+
+During batch processing, a clean single-line progress bar shows:
+
+```
+[████████████████████] 13/13 ✓13 ⊘0 ✗0 ⏱15s video_filename.mp4
+```
+
+- `█` - Progress bar
+- `✓` - Successful thumbnails
+- `⊘` - Skipped (existing)
+- `✗` - Failed
+- `⏱` - Elapsed time
+- Current file being processed
+
+Output is saved to timestamped directories: `output/20260307_064021/`
+
 ## Requirements
 
--   Python 3.6+
--   `opencv-python` (for video processing and broad codec support)
--   `numpy` (for numerical operations)
--   `Pillow` (PIL) (for image manipulation)
--   `tqdm` (for progress bars)
+- Python 3.10+
+- `av` - PyAV (FFmpeg-based video processing)
+- `numpy` - For numerical operations
+- `Pillow` - For image manipulation
+- `tqdm` - For progress bars
+- `scipy` - For image resizing
 
 ## License
 
 MIT License
 
-Copyright (c) 2025 ilhamazdi
+Copyright (c) 2025-2026 ilhamazdi
